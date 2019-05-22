@@ -1,0 +1,9 @@
+mitm
+
+# Emacs Temp/Autosaves
+*~
+\#*\#
+.#*.*
+*_flymake*
+.markdown-preview.html
+.tags
