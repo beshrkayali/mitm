@@ -1,4 +1,3 @@
-// http_request_change_headers.go
 package main
 
 import (
@@ -6,16 +5,33 @@ import (
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gorilla/mux"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
-	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 var urlr = regexp.MustCompile(`(http|ftp|https):\/\/([\w\-_]+(?:(?:\.[\w\-_]+)+))([\w\-\.,@?^=%&amp;:/~\+#]*[\w\-\@?^=%&amp;/~\+#])?`)
+
+type Segment struct {
+	Content template.HTML
+}
+
+type Page struct {
+	// Title    string
+	Segments []Segment
+}
+
+func minifmt(t string, ctx ...string) string {
+	ictx := make([]interface{}, len(ctx))
+	for i, v := range ctx {
+		ictx[i] = v
+	}
+
+	return fmt.Sprintf(t, ictx...)
+}
 
 func parse(url string) string {
 	var content bytes.Buffer
@@ -41,15 +57,50 @@ func parse(url string) string {
 		log.Fatal("Error loading HTTP response body. ", err)
 	}
 
-	title := document.Find("h1.graf").Text()
+	// title := document.Find("h1.graf").Text()
 
-	content.WriteString(fmt.Sprintf("%s\n", title))
-	content.WriteString(fmt.Sprintf(strings.Repeat("=", utf8.RuneCountInString(title))))
-	content.WriteString(fmt.Sprintf(("\n\n")))
+	// if title == "" {
+	// 	title = document.Find("h1.elevate-h1").Text()
+	// }
 
-	document.Find(".section-content p.graf.graf--p").Each(func(i int, s *goquery.Selection) {
-		content.WriteString(fmt.Sprintf("%s\n\n", s.Text()))
+	var segments []Segment
+
+	document.Find(".section-content .graf.graf--p, .section-content .graf.graf--pre, .section-content .postList, .progressiveMedia-image, blockquote, h1 , h2, h3").Each(func(i int, s *goquery.Selection) {
+		// c := fmt.Sprintf("<code>%s</code>", s.Text())
+		c := ""
+		nodename := goquery.NodeName(s)
+
+		switch {
+		case s.HasClass("graf--p"):
+			c = minifmt("<p>%s</p>", s.Text())
+		case nodename == "blockquote":
+			c = minifmt("<blockquote>%s</blockquote>", s.Text())
+		case nodename == "h1" || nodename == "h2" || nodename == "h3":
+			c = minifmt("<%s>%s</%s>", nodename, s.Text(), nodename)
+		case s.HasClass("graf--pre"):
+			c = minifmt("<pre><code>%s</code></pre>", s.Text())
+		case s.HasClass("postList"):
+			c = "<p>FIXME</p>"
+		case s.HasClass("progressiveMedia-image"):
+			src, _ := s.Attr("data-src");
+			c = minifmt("<img src='%s' />", src)
+		}
+
+		segments = append(segments, Segment{
+			Content: template.HTML(c),
+		})
 	})
+
+	parsed_page := Page{
+		// Title:    title,
+		Segments: segments,
+	}
+
+	tmpl := template.Must(template.New("page").Parse(`
+<html><head><style>.content { margin: 50px 100px; line-height: 30px; } img {display: block; max-height: 300px; max-width: 600px; margin: 20px auto} blockquote { font-size: 1.5em; }</style></head>
+<body><div class="content">{{range .Segments}}{{.Content}}{{end}}</div></body></html>`))
+
+	tmpl.Execute(&content, parsed_page)
 
 	return content.String()
 }
